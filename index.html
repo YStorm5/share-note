@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Collaborative Notes</title>
+    <style>
+        :root {
+            --bg-color: #f5f5f5;
+            --form-bg: white;
+            --text-color: #333;
+            --input-border: #ddd;
+            --shadow: rgba(0, 0, 0, 0.1);
+            --status-bg: white;
+            --status-border: #eee;
+            --hover-bg: #f0f0f0;
+            --textarea-bg: white;
+        }
+
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --form-bg: #2d2d2d;
+            --text-color: #e0e0e0;
+            --input-border: #444;
+            --shadow: rgba(0, 0, 0, 0.3);
+            --status-bg: #2d2d2d;
+            --status-border: #444;
+            --hover-bg: #3a3a3a;
+            --textarea-bg: #252526;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-color);
+            height: 100vh;
+            overflow: hidden;
+            color: var(--text-color);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #join-form {
+            padding: 20px;
+            background: var(--form-bg);
+            box-shadow: 0 2px 4px var(--shadow);
+            position: relative;
+        }
+
+        #editor {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #textarea {
+            flex: 1;
+            width: 100%;
+            border: none;
+            padding: 20px;
+            font-size: 16px;
+            resize: none;
+            outline: none;
+            background: var(--textarea-bg);
+            color: var(--text-color);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        input {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            background: var(--form-bg);
+            color: var(--text-color);
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .error {
+            color: #dc3545;
+            margin-top: 10px;
+        }
+
+        .status-bar {
+            padding: 10px 20px;
+            background: var(--status-bg);
+            border-top: 1px solid var(--status-border);
+            color: var(--text-color);
+        }
+
+        #room-list {
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .room-item {
+            padding: 5px;
+            cursor: pointer;
+        }
+
+        .room-item:hover {
+            background: var(--hover-bg);
+        }
+
+        #dark-mode-toggle {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            padding: 6px 12px;
+            background: #666;
+        }
+
+        #dark-mode-toggle:hover {
+            background: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div id="join-form">
+            <input id="roomId" placeholder="Room ID" />
+            <input id="password" type="password" placeholder="Password" />
+            <button onclick="createRoom()">Create Room</button>
+            <button onclick="joinRoom()">Join Room</button>
+            <button id="dark-mode-toggle" onclick="toggleDarkMode()">Dark Mode</button>
+            <div id="error" class="error"></div>
+            <div id="room-list"></div>
+        </div>
+        <div id="editor" style="display: none;">
+            <textarea id="textarea" spellcheck="false" autocomplete="false" placeholder="Start typing..."></textarea>
+            <div class="status-bar">Connected users: <span id="userCount">0</span></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let roomId;
+        const textarea = document.getElementById("textarea");
+        const editor = document.getElementById("editor");
+        const joinForm = document.getElementById("join-form");
+        const errorDiv = document.getElementById("error");
+        const userCount = document.getElementById("userCount");
+        const roomList = document.getElementById("room-list");
+        const darkModeToggle = document.getElementById("dark-mode-toggle");
+
+        function createRoom() {
+            const room = document.getElementById("roomId").value.trim();
+            const password = document.getElementById("password").value.trim();
+            if (!room || !password) {
+                showError("Please enter both room ID and password");
+                return;
+            }
+            connect("create", room, password);
+        }
+
+        function joinRoom() {
+            const room = document.getElementById("roomId").value.trim();
+            const password = document.getElementById("password").value.trim();
+            if (!room || !password) {
+                showError("Please enter both room ID and password");
+                return;
+            }
+            connect("join", room, password);
+        }
+
+        function connect(type, room, password) {
+            if (!ws || ws.readyState === WebSocket.CLOSED) {
+                ws = new WebSocket("ws://room-note.deno.dev");
+
+                ws.onopen = () => {
+                    console.log("WebSocket opened");
+                    ws.send(JSON.stringify({ type, roomId: room, password }));
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    console.log("Received message:", data);
+                    switch (data.type) {
+                        case "roomList":
+                            updateRoomList(data.rooms);
+                            break;
+                        case "joined":
+                            roomId = data.roomId;
+                            joinForm.style.display = "none";
+                            editor.style.display = "flex";
+                            textarea.value = data.content;
+                            userCount.textContent = data.userCount;
+                            errorDiv.textContent = "";
+                            break;
+                        case "contentUpdate":
+                            textarea.value = data.content;
+                            break;
+                        case "userJoined":
+                        case "userLeft":
+                            userCount.textContent = data.userCount;
+                            break;
+                        case "error":
+                            showError(data.message);
+                            if (type !== "getRooms") {
+                                ws.close();
+                            }
+                            break;
+                    }
+                };
+
+                ws.onclose = () => {
+                    console.log("WebSocket closed");
+                    joinForm.style.display = "block";
+                    editor.style.display = "none";
+                    showError("Disconnected from room");
+                    fetchRooms();
+                };
+
+                ws.onerror = (e) => {
+                    console.error("WebSocket error:", e);
+                    showError("Connection error");
+                };
+            } else if (type !== "getRooms") {
+                ws.send(JSON.stringify({ type, roomId: room, password }));
+            }
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+        }
+
+        function updateRoomList(rooms) {
+            roomList.innerHTML = rooms.length > 0
+                ? '<h4>Available Rooms:</h4>' + rooms.map(room =>
+                    `<div class="room-item" onclick="document.getElementById('roomId').value='${room}'">${room}</div>`
+                ).join('')
+                : '<p>No rooms available</p>';
+        }
+
+        function fetchRooms() {
+            connect("getRooms");
+        }
+
+        function toggleDarkMode() {
+            document.body.classList.toggle("dark-mode");
+            const isDark = document.body.classList.contains("dark-mode");
+            darkModeToggle.textContent = isDark ? "Light Mode" : "Dark Mode";
+            localStorage.setItem("darkMode", isDark ? "true" : "false");
+        }
+
+        textarea.addEventListener("input", () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "update",
+                    content: textarea.value,
+                }));
+            }
+        });
+
+        // Load dark mode preference and fetch rooms on page load
+        window.onload = () => {
+            const darkModePref = localStorage.getItem("darkMode");
+            if (darkModePref === "true") {
+                document.body.classList.add("dark-mode");
+                darkModeToggle.textContent = "Light Mode";
+            }
+            fetchRooms();
+        };
+    </script>
+</body>
+
+</html>
