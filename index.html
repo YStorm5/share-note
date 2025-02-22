@@ -188,7 +188,7 @@
 
         function connect(type, room, password) {
             if (!ws || ws.readyState === WebSocket.CLOSED) {
-                ws = new WebSocket("ws://room-note.deno.dev");
+                ws = new WebSocket("wss://room-note.deno.dev");
 
                 ws.onopen = () => {
                     console.log("WebSocket opened");
